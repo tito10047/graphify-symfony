@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "graphify-symfony"
+version = "0.1.0"
+description = "Symfony post-pass for Graphify: Twig templates, components, routes, DI container, Doctrine and Messenger wiring in graph.json"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Jozef Mostka" }]
+dependencies = ["pyyaml>=6"]
+
+[project.scripts]
+graphify-symfony = "graphify_symfony.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["graphify_symfony"]
+
+[tool.hatch.build.targets.sdist]
+include = ["graphify_symfony", "tests", "README.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
