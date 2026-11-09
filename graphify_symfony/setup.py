@@ -92,8 +92,11 @@ class State:
         self.data.setdefault("files", {})
 
     def save(self) -> None:
+        data = (json.dumps(self.data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        if self.path.is_file() and self.path.read_bytes() == data:
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        _write_bytes(self.path, (json.dumps(self.data, indent=2, sort_keys=True) + "\n").encode("utf-8"))
+        _write_bytes(self.path, data)
 
     # -- file tracking -------------------------------------------------------
     def apply(self, rel: str, transform) -> str:
@@ -323,7 +326,6 @@ def setup(root: Path, claude_hooks: str = "local", git_hooks: bool = True, build
           log=print) -> dict:
     root = root.resolve()
     st = State(root)
-    st.data.setdefault("created", time.strftime("%Y-%m-%dT%H:%M:%S"))
     st.data["claude_hooks"] = claude_hooks
     res: dict = {"root": str(root), "files": {}}
 
@@ -362,6 +364,12 @@ def setup(root: Path, claude_hooks: str = "local", git_hooks: bool = True, build
                     st.data["files"][rel] = {"existed": cur is not None,
                                              "original": base64.b64encode(cur).decode() if cur is not None else None,
                                              "written": _sha(cur), "dirty": False}
+            _status_text, hooks_ok = hookmod.status(root)
+        if _is_git(root) and hooks_ok:
+            res["git_hooks"] = "already installed (unchanged)"
+        elif _is_git(root):
+            gh = st.data["git_hooks"]
+            rels = [_hook_rel(root, h) for h in hookmod.HOOKS]
             attrs_before = (root / ".gitattributes").read_bytes() if (root / ".gitattributes").is_file() else None
             out = hookmod.install(root)
             # graph.json is never committed, so graphify's merge driver cannot apply:

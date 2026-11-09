@@ -108,3 +108,39 @@ def test_setup_builds_graph(repo: Path, monkeypatch):
     assert any(n.get("_origin") == ORIGIN and n.get("sf_type") == "template" for n in g["nodes"])
     assert main(["teardown", "--root", str(repo), "--purge"]) == 0
     assert not (repo / "graphify-out").exists()
+
+
+def _mtimes(root: Path) -> dict[str, int]:
+    return {p.relative_to(root).as_posix(): p.stat().st_mtime_ns for p in root.rglob("*")
+            if p.is_file() and not p.relative_to(root).as_posix().startswith(".git/objects")}
+
+
+ROLLOUT = "# >>> graphify-rollout (managed) >>>\n/graphify-out/\n*.generated.php\n# <<< graphify-rollout <<<\n"
+
+
+def test_rerun_touches_nothing_and_foreign_blocks_survive(repo: Path, monkeypatch):
+    monkeypatch.setenv("GRAPHIFY_BACKEND", "none")
+    for rel in (".gitignore", ".graphifyignore"):
+        p = repo / rel
+        p.write_bytes((p.read_bytes() + b"\r\n" if p.exists() else b"") + ROLLOUT.encode())
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "rollout block")
+    before = _snapshot(repo)
+    assert main(["setup", "--root", str(repo)]) == 0
+    gi = (repo / ".gitignore").read_text(encoding="utf-8")
+    assert ROLLOUT in gi
+    assert "/graphify-out/" not in gi.split("# <<< graphify-rollout <<<")[1]  # not duplicated
+    assert ROLLOUT in (repo / ".graphifyignore").read_text(encoding="utf-8")
+
+    m1 = _mtimes(repo)
+    assert main(["setup", "--root", str(repo)]) == 0
+    assert _mtimes(repo) == m1
+
+    # the rollout tool edits its own block afterwards; teardown removes only ours
+    for rel in (".gitignore", ".graphifyignore"):
+        p = repo / rel
+        p.write_bytes(p.read_bytes().replace(b"*.generated.php", b"*.gen.php"))
+    assert main(["teardown", "--root", str(repo), "--purge"]) == 0
+    for rel in (".gitignore", ".graphifyignore"):
+        expected = before[rel].decode().replace("*.generated.php", "*.gen.php")
+        assert (repo / rel).read_bytes().decode() == expected

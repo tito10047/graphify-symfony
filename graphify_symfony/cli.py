@@ -245,7 +245,10 @@ def cmd_setup(args) -> int:
 def cmd_teardown(args) -> int:
     from .setup import teardown
 
-    res = teardown(Path(args.root), purge=args.purge)
+    try:
+        res = teardown(Path(args.root), purge=args.purge)
+    except Exception as exc:
+        res = {"ok": False, "error": f"{type(exc).__name__}: {exc}", "files": {}}
     if args.json:
         print(json.dumps(res, indent=2))
     else:
@@ -253,7 +256,9 @@ def cmd_teardown(args) -> int:
             print(f"  {rel}: {status}")
         if res.get("purged"):
             print(f"  removed {res['purged']}")
-    return 0
+        if res.get("error"):
+            print(f"error: {res['error']}", file=sys.stderr)
+    return 1 if res.get("error") else 0
 
 
 def main(argv: list[str] | None = None) -> int:
