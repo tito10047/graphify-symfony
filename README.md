@@ -36,33 +36,121 @@ container is taken from the XML dump Symfony already writes to `var/cache/dev/`.
 ## Installation
 
 graphify-symfony must live in the **same environment as Graphify**, because it uses
-Graphify's own node-id function and rebuild lock. Install it into the Graphify tool
-environment and expose its executable:
+Graphify's own node-id function, rebuild lock and installer helpers. Both are
+installed together as one [uv](https://docs.astral.sh/uv/) tool: Graphify
+(`graphifyy`) with graphify-symfony added via `--with`, and
+`--with-executables-from graphify-symfony` to put the `graphify-symfony` command on
+`PATH` (`--with` alone installs the package but not its command).
+
+### Installation on Linux/macOS
 
 ```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh      # if uv is not installed yet
 uv tool install --force \
   --with git+https://github.com/tito10047/graphify-symfony.git \
   --with-executables-from graphify-symfony \
   graphifyy
+uv tool update-shell                                 # once, if ~/.local/bin is not on PATH
+graphify-symfony --version
 ```
 
-From a local checkout:
+From a local checkout, use `--with /path/to/graphify-symfony` instead of the git URL
+(it installs a copy: re-run the command after changing the checkout). Add any extras
+you normally use (`"graphifyy[mcp]"`, ...).
+
+### Installation on Windows
+
+1. Install [Git for Windows](https://git-scm.com/download/win). It is needed for the
+   `git+https` install and it provides the `sh` that runs git hooks.
+2. Install uv (PowerShell):
+
+   ```powershell
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+
+3. Open a new terminal and install Graphify with graphify-symfony (one line, works in
+   PowerShell and cmd):
+
+   ```powershell
+   uv tool install --force --with git+https://github.com/tito10047/graphify-symfony.git --with-executables-from graphify-symfony graphifyy
+   ```
+
+4. If `graphify-symfony` is not found, run `uv tool update-shell` and open a new
+   terminal (it adds uv's tool directory, `%USERPROFILE%\.local\bin`, to `PATH`).
+5. Verify: `graphify-symfony --version` and `graphify --version`.
+
+### Pitfall: a failed `--force` install removes Graphify
+
+`uv tool install --force` replaces the whole Graphify tool environment. If the
+build fails (network error, bad local path, ...) uv has already deleted the old
+environment and `graphify` is gone too. Fix the cause and re-run the same command
+(or `uv tool install --force graphifyy` to get plain Graphify back).
+
+## Adding to a project
 
 ```sh
-uv tool install --force \
-  --with /path/to/graphify-symfony \
-  --with-executables-from graphify-symfony \
-  graphifyy
+cd my-symfony-project
+graphify-symfony setup --root .
 ```
 
-`--with` alone installs the package but does not put `graphify-symfony` on `PATH`;
-`--with-executables-from graphify-symfony` does. Add any extras you normally use
-(`"graphifyy[mcp]"`, …). `uv tool install --force` replaces the whole Graphify tool
-environment: if the build fails, re-run it (or a plain `uv tool install --force
-graphifyy`) to get `graphify` back. `--with <path>` installs a copy, so re-run the
-command after changing a local checkout.
+`setup` is idempotent (run it again any time) and does:
 
-Check with `graphify-symfony --version`.
+* `.graphifyignore`: adds a managed block (`vendor/`, `var/`, `node_modules/`,
+  `public/build/`, `public/bundles/`, `assets/vendor/`, `translations/`,
+  `migrations/`, `*.min.js`, lock files, `.claude/`).
+* `.gitignore`: adds `/graphify-out/` (the graph and its report stay local) and
+  `/.claude/settings.local.json`, unless already ignored.
+* `CLAUDE.md`: adds Graphify's `## graphify` section (the same text `graphify claude
+  install` writes).
+* Claude Code hooks: Graphify's `PreToolUse`/`SessionStart` hooks go into
+  `.claude/settings.local.json` (`--claude-hooks local`, the default), which is not
+  committed, so teammates without Graphify never get hook errors. If
+  `.claude/settings.json` contains Graphify hooks they are moved out; other entries
+  are kept. `--claude-hooks shared` uses Graphify's default location
+  (`.claude/settings.json`, bare `graphify` command), `--claude-hooks none` leaves
+  Claude settings alone. Note that a later `graphify claude install` writes its hooks
+  into `.claude/settings.json` again; re-running `graphify-symfony setup` moves them
+  back.
+* Git hooks: `graphify-symfony hook install` (skip with `--no-git-hooks`). Graphify's
+  merge driver for `graph.json` is not kept (the graph is not committed), so
+  `.gitattributes` and `.git/config` stay as they were.
+* First build, unless `--no-build` or the graph is already at `HEAD`:
+  `graphify extract . --code-only`, `graphify cluster-only . --no-label` (both with
+  `GRAPHIFY_BACKEND=none`, no LLM calls) and `graphify-symfony run`.
+
+`--json` prints a machine-readable summary. Commit only `.graphifyignore`,
+`.gitignore` and `CLAUDE.md` (plus `.claude/settings.json` if Graphify hooks were moved
+out of it). Teammates without the tools are unaffected: nothing they check out calls
+Graphify, and `CLAUDE.md` only tells AI assistants that a graph may exist.
+
+What `setup` changed is recorded in `graphify-out/.graphify-symfony-setup.json`.
+
+## Updating
+
+```sh
+uv tool upgrade graphifyy
+```
+
+upgrades Graphify and keeps graphify-symfony in the environment (uv re-resolves it
+from the source it was installed from). If `graphify-symfony` is missing afterwards,
+or to be sure you have the latest graphify-symfony, re-run the install command with
+`--with ... --with-executables-from graphify-symfony` (a plain
+`uv tool install --force graphifyy` drops it). Then re-run
+`graphify-symfony hook install --root .` in your projects so the git hooks point at the
+current environment.
+
+## Removing
+
+```sh
+graphify-symfony teardown --root .          # undo setup, keep graphify-out/
+graphify-symfony teardown --root . --purge  # ... and delete graphify-out/
+uv tool uninstall graphifyy                 # remove both tools
+```
+
+`teardown` restores every file `setup` touched byte for byte when it has not been
+edited since; otherwise it removes only the managed block, the Graphify section or the
+Graphify hooks. Without `--purge` it also strips graphify-symfony's nodes from
+`graph.json`.
 
 ## Usage
 

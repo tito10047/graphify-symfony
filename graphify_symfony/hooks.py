@@ -76,12 +76,23 @@ mkdir -p "$(dirname "$_GFS_LOG")" 2>/dev/null
 _GFS_PY='__PINNED_PYTHON__'
 if [ -x "$_GFS_PY" ] && "$_GFS_PY" -c "import graphify_symfony" 2>/dev/null; then
     "$_GFS_PY" -c 'import os, subprocess, sys
-log = open(sys.argv[1], "a", buffering=1)
-subprocess.Popen([sys.executable, "-m", "graphify_symfony", "run", "--root", os.getcwd(), "--after-graphify"],
-                 stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, close_fds=True,
-                 start_new_session=True)' "$_GFS_LOG"
+log = open(sys.argv[1], "a", buffering=1, encoding="utf-8", errors="replace")
+cmd = [sys.executable, "-m", "graphify_symfony", "run", "--root", os.getcwd(), "--after-graphify"]
+kw = dict(stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, close_fds=True)
+if os.name == "nt":
+    flags = 0x08000000 | 0x00000200  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+    try:
+        subprocess.Popen(cmd, creationflags=flags | 0x01000000, **kw)  # + CREATE_BREAKAWAY_FROM_JOB
+    except OSError:
+        subprocess.Popen(cmd, creationflags=flags, **kw)
+else:
+    subprocess.Popen(cmd, start_new_session=True, **kw)' "$_GFS_LOG"
 elif command -v graphify-symfony >/dev/null 2>&1; then
-    nohup graphify-symfony run --root "$PWD" --after-graphify </dev/null >>"$_GFS_LOG" 2>&1 &
+    if command -v nohup >/dev/null 2>&1; then
+        nohup graphify-symfony run --root "$PWD" --after-graphify </dev/null >>"$_GFS_LOG" 2>&1 &
+    else
+        graphify-symfony run --root "$PWD" --after-graphify </dev/null >>"$_GFS_LOG" 2>&1 &
+    fi
 else
     echo "[graphify-symfony hook] graphify-symfony not found; re-run 'graphify-symfony hook install'" >&2
 fi
@@ -90,9 +101,19 @@ fi
 """
 
 
+def _write_lf(path: Path, text: str) -> None:
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
+def _read(path: Path) -> str:
+    with open(path, encoding="utf-8", errors="replace", newline="") as fh:
+        return fh.read().replace("\r\n", "\n")
+
+
 def render_block(hook: str, python: str | None = None) -> str:
-    py = python or sys.executable
-    if not re.fullmatch(r"[\w/.@:+\-]+", py):
+    py = (python or sys.executable).replace("\\", "/")  # C:/... works in Git for Windows' sh and in Windows
+    if not re.fullmatch(r"[\w/.@:+ \-]+", py):
         py = ""
     return _BLOCK.replace("__GUARD__", _GUARDS[hook]).replace("__PINNED_PYTHON__", py)
 
@@ -116,7 +137,7 @@ def _strip_block(text: str) -> str:
 
 def install_block(path: Path, hook: str, python: str | None = None) -> str:
     block = render_block(hook, python)
-    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    text = _read(path) if path.exists() else ""
     had = MARK in text
     if had:
         text = _strip_block(text)
@@ -136,7 +157,7 @@ def install_block(path: Path, hook: str, python: str | None = None) -> str:
             text += "\n"
         text += block
     text = re.sub(r"\n{3,}", "\n\n", text)
-    path.write_text(text, encoding="utf-8")
+    _write_lf(path, text)
     mode = path.stat().st_mode
     path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return "updated" if had else "installed"
@@ -145,14 +166,14 @@ def install_block(path: Path, hook: str, python: str | None = None) -> str:
 def uninstall_block(path: Path) -> str:
     if not path.exists():
         return "not installed"
-    text = path.read_text(encoding="utf-8")
+    text = _read(path)
     if MARK not in text:
         return "not installed"
     text = _strip_block(text)
     if text.strip() in ("", "#!/bin/sh", "#!/bin/bash", "#!/usr/bin/env sh"):
         path.unlink()
         return "removed (hook file deleted)"
-    path.write_text(re.sub(r"\n{3,}", "\n\n", text), encoding="utf-8")
+    _write_lf(path, re.sub(r"\n{3,}", "\n\n", text))
     return "removed"
 
 
@@ -189,7 +210,7 @@ def status(root: Path) -> tuple[str, bool]:
     lines = []
     for hook in HOOKS:
         p = hd / hook
-        text = p.read_text(encoding="utf-8") if p.exists() else ""
+        text = _read(p) if p.exists() else ""
         ours = MARK in text
         gfy = GRAPHIFY_START[hook] in text
         order = ""

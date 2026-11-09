@@ -149,8 +149,17 @@ def test_hook_block_chaining(tmp_path):
     assert "post-commit: graphify-symfony installed, after graphify" in status
     assert hooks.uninstall_block(hook) == "removed"
     assert hooks.MARK not in hook.read_text() and "graphify v2" in hook.read_text()
-    # sh syntax check of the rendered blocks
+    # sh syntax check of the rendered blocks (Git for Windows ships sh as well)
+    import shutil
+
+    sh_exe = shutil.which("sh") or shutil.which("bash")
+    if sh_exe is None:
+        return
     for h in hooks.HOOKS:
-        sh = tmp_path / f"{h}.sh"
-        sh.write_text("#!/bin/sh\n" + hooks.render_block(h, "/usr/bin/python3"))
-        subprocess.run(["sh", "-n", str(sh)], check=True)
+        for py in ("/usr/bin/python3", "C:\\Users\\First Last\\uv\\tools\\graphifyy\\Scripts\\python.exe"):
+            block = hooks.render_block(h, py)
+            assert "C:/Users/First Last/" in block or py.startswith("/")
+            sh = tmp_path / f"{h}.sh"
+            with open(sh, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write("#!/bin/sh\n" + block)
+            subprocess.run([sh_exe, "-n", sh.as_posix()], check=True)

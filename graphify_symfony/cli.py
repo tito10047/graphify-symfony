@@ -217,6 +217,45 @@ def cmd_hook(args) -> int:
     return 0 if ok else 1
 
 
+def cmd_setup(args) -> int:
+    from .setup import setup
+
+    log = (lambda *a, **k: print(*a, file=sys.stderr, **k)) if args.json else print
+    try:
+        res = setup(Path(args.root), claude_hooks=args.claude_hooks, git_hooks=not args.no_git_hooks,
+                    build=not args.no_build, log=log)
+    except Exception as exc:
+        res = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    if args.json:
+        print(json.dumps(res, indent=2))
+    else:
+        for rel, status in (res.get("files") or {}).items():
+            print(f"  {rel}: {status}")
+        if res.get("git_hooks"):
+            print("  git hooks:\n    " + str(res["git_hooks"]).replace("\n", "\n    "))
+        if res.get("build"):
+            print(f"  graph: {res['build']}")
+        if res.get("error"):
+            print(f"error: {res['error']}", file=sys.stderr)
+        if res.get("ok"):
+            print("Commit .graphifyignore, .gitignore and CLAUDE.md; graphify-out/ stays local.")
+    return 0 if res.get("ok") else 1
+
+
+def cmd_teardown(args) -> int:
+    from .setup import teardown
+
+    res = teardown(Path(args.root), purge=args.purge)
+    if args.json:
+        print(json.dumps(res, indent=2))
+    else:
+        for rel, status in res["files"].items():
+            print(f"  {rel}: {status}")
+        if res.get("purged"):
+            print(f"  removed {res['purged']}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="graphify-symfony", description=__doc__)
     p.add_argument("--version", action="version", version=__version__)
@@ -252,6 +291,22 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--root", default=".")
     h.add_argument("--no-graphify", action="store_true", help="install: do not (re)install graphify's own hooks")
     h.set_defaults(fn=cmd_hook)
+
+    su = sub.add_parser("setup", help="one-shot per-project setup (ignore files, CLAUDE.md, hooks, first build)")
+    su.add_argument("--root", default=".")
+    su.add_argument("--claude-hooks", choices=["local", "shared", "none"], default="local",
+                    help="where graphify's Claude Code hooks go: .claude/settings.local.json (default), "
+                         ".claude/settings.json, or nowhere")
+    su.add_argument("--no-git-hooks", action="store_true")
+    su.add_argument("--no-build", action="store_true", help="do not build the graph")
+    su.add_argument("--json", action="store_true")
+    su.set_defaults(fn=cmd_setup)
+
+    td = sub.add_parser("teardown", help="undo `setup` (restores files byte-exactly where possible)")
+    td.add_argument("--root", default=".")
+    td.add_argument("--purge", action="store_true", help="also delete graphify-out/")
+    td.add_argument("--json", action="store_true")
+    td.set_defaults(fn=cmd_teardown)
 
     args = p.parse_args(argv)
     return args.fn(args)

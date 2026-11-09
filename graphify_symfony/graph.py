@@ -54,7 +54,11 @@ def write_graph_atomic(path: Path, graph: dict) -> None:
             os.chmod(tmp, os.stat(path).st_mode & 0o777)
         except OSError:
             pass
-        os.replace(tmp, path)
+        try:
+            from graphify.paths import os_replace_with_fallback as _replace  # type: ignore
+        except Exception:
+            _replace = os.replace
+        _replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
