@@ -211,11 +211,21 @@ def _gfy_install():
                            "install graphify-symfony into graphify's uv tool env") from exc
 
 
+def _has_custom_section(text: str) -> bool:
+    """A hand-written ``## graphify ...`` heading (e.g. ``## graphify - code graph``):
+    graphify only replaces an exact ``## graphify`` line and would append a second copy."""
+    lines = [ln.strip() for ln in text.replace("\r\n", "\n").split("\n")]
+    return CLAUDE_MARKER not in lines and any(
+        ln.startswith(CLAUDE_MARKER) and not ln[len(CLAUDE_MARKER):][:1].isalnum() for ln in lines)
+
+
 def _claude_md(text: str | None) -> str:
     gi = _gfy_install()
     section = gi._always_on("claude-md")
     if text is None:
         return section
+    if _has_custom_section(text):
+        return text
     nl = _nl(text)
     norm = text.replace("\r\n", "\n")
     new = gi._replace_or_append_section(norm, CLAUDE_MARKER, section)
@@ -323,7 +333,7 @@ def _hook_rel(root: Path, name: str) -> str:
 
 # -------------------------------------------------------------- commands
 def setup(root: Path, claude_hooks: str = "local", git_hooks: bool = True, build: bool = True,
-          log=print) -> dict:
+          log=print, claude_md: bool = True) -> dict:
     root = root.resolve()
     st = State(root)
     st.data["claude_hooks"] = claude_hooks
@@ -332,7 +342,8 @@ def setup(root: Path, claude_hooks: str = "local", git_hooks: bool = True, build
     res["files"][".graphifyignore"] = st.apply(".graphifyignore", lambda t: _with_block(t, GRAPHIFYIGNORE))
     res["files"][".gitignore"] = st.apply(
         ".gitignore", lambda t: _with_block(t, _gitignore_entries(t, claude_hooks == "local")))
-    res["files"]["CLAUDE.md"] = st.apply("CLAUDE.md", _claude_md)
+    if claude_md:
+        res["files"]["CLAUDE.md"] = st.apply("CLAUDE.md", _claude_md)
     if claude_hooks == "local":
         res["files"][".claude/settings.local.json"] = st.apply(".claude/settings.local.json", _settings_add(False))
         if (root / ".claude" / "settings.json").is_file():

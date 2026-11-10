@@ -144,3 +144,27 @@ def test_rerun_touches_nothing_and_foreign_blocks_survive(repo: Path, monkeypatc
     for rel in (".gitignore", ".graphifyignore"):
         expected = before[rel].decode().replace("*.generated.php", "*.gen.php")
         assert (repo / rel).read_bytes().decode() == expected
+
+
+def test_setup_keeps_custom_graphify_section(repo: Path):
+    custom = b"# Acme\r\n\r\n## graphify - code graph (use it first)\r\n\r\nOur own rules.\r\n"
+    (repo / "CLAUDE.md").write_bytes(custom)
+    assert main(["setup", "--root", str(repo), "--no-build", "--no-git-hooks", "--claude-hooks", "none"]) == 0
+    assert (repo / "CLAUDE.md").read_bytes() == custom
+    assert main(["teardown", "--root", str(repo)]) == 0
+    assert (repo / "CLAUDE.md").read_bytes() == custom
+
+
+def test_setup_no_claude_md(repo: Path):
+    before = (repo / "CLAUDE.md").read_bytes()
+    assert main(["setup", "--root", str(repo), "--no-build", "--no-git-hooks", "--claude-hooks", "none",
+                 "--no-claude-md"]) == 0
+    assert (repo / "CLAUDE.md").read_bytes() == before
+
+
+def test_graphifyfoo_heading_is_not_a_custom_section():
+    from graphify_symfony.setup import _has_custom_section
+
+    assert _has_custom_section("## graphify — znalostný graf\n")
+    assert not _has_custom_section("## graphify\n")
+    assert not _has_custom_section("## graphifyish\n")

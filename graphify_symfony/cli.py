@@ -204,6 +204,30 @@ def cmd_strip(args) -> int:
     return 0
 
 
+def cmd_route(args) -> int:
+    from .lookup import find_routes, format_hit, resolve, to_json
+
+    root = Path(args.root).resolve()
+    gpath = _out_dir(root) / "graph.json"
+    if not gpath.is_file():
+        print(f"no {gpath} - run `graphify update {root}` and `graphify-symfony run` first", file=sys.stderr)
+        return 2
+    graph = load_graph(gpath)
+    hits = find_routes(graph, args.query, method=args.method, app=args.app)
+    total = len(hits)
+    hits = hits[:args.limit]
+    resolve(graph, hits)
+    if args.json:
+        print(json.dumps({"query": args.query, "total": total, "routes": [to_json(h) for h in hits]}, indent=2))
+    elif not hits:
+        print(f"no route matches {args.query!r}", file=sys.stderr)
+    else:
+        print("\n\n".join(format_hit(h) for h in hits))
+        if total > len(hits):
+            print(f"\n... {total - len(hits)} more (raise --limit)")
+    return 0 if hits else 4
+
+
 def cmd_hook(args) -> int:
     root = Path(args.root)
     if args.action == "install":
@@ -223,7 +247,7 @@ def cmd_setup(args) -> int:
     log = (lambda *a, **k: print(*a, file=sys.stderr, **k)) if args.json else print
     try:
         res = setup(Path(args.root), claude_hooks=args.claude_hooks, git_hooks=not args.no_git_hooks,
-                    build=not args.no_build, log=log)
+                    build=not args.no_build, log=log, claude_md=not args.no_claude_md)
     except Exception as exc:
         res = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     if args.json:
@@ -291,6 +315,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--root", default=".")
     s.set_defaults(fn=cmd_strip)
 
+    rt = sub.add_parser("route", help="which controller serves a URL / route name (and what it renders)")
+    rt.add_argument("query", help="URL (/products/5, full URL ok), exact route name, or a fragment of either")
+    rt.add_argument("--method", help="only routes accepting this HTTP method")
+    rt.add_argument("--app", help="only routes declared under this directory (e.g. projects/rds in a monorepo)")
+    rt.add_argument("--limit", type=int, default=10)
+    rt.add_argument("--root", default=".")
+    rt.add_argument("--json", action="store_true")
+    rt.set_defaults(fn=cmd_route)
+
     h = sub.add_parser("hook", help="chain the post-pass into graphify's git hooks")
     h.add_argument("action", choices=["install", "uninstall", "status"])
     h.add_argument("--root", default=".")
@@ -304,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
                          ".claude/settings.json, or nowhere")
     su.add_argument("--no-git-hooks", action="store_true")
     su.add_argument("--no-build", action="store_true", help="do not build the graph")
+    su.add_argument("--no-claude-md", action="store_true", help="leave CLAUDE.md alone")
     su.add_argument("--json", action="store_true")
     su.set_defaults(fn=cmd_setup)
 

@@ -101,7 +101,9 @@ graphify-symfony setup --root .
 * `.gitignore`: adds `/graphify-out/` (the graph and its report stay local) and
   `/.claude/settings.local.json`, unless already ignored.
 * `CLAUDE.md`: adds Graphify's `## graphify` section (the same text `graphify claude
-  install` writes).
+  install` writes). A hand-written section whose heading only starts with `## graphify`
+  (`## graphify - code graph`, ...) is left alone instead of getting a second copy
+  appended; `--no-claude-md` skips the file entirely.
 * Claude Code hooks: Graphify's `PreToolUse`/`SessionStart` hooks go into
   `.claude/settings.local.json` (`--claude-hooks local`, the default), which is not
   committed, so teammates without Graphify never get hook errors. If
@@ -161,7 +163,31 @@ graphify-symfony run --root . -v            # with per-kind counts and timings
 graphify-symfony run --root . --json        # machine-readable stats + unresolved samples
 graphify-symfony detect --root . [--json]   # Symfony apps, Twig paths, container dumps
 graphify-symfony strip --root .             # remove everything graphify-symfony added
+graphify-symfony route /products/5          # which controller serves a URL (see below)
 ```
+
+### Which controller serves this URL?
+
+`graphify explain "/products/5"` is the wrong tool for that: graphify resolves a query
+against file paths first, so `templates/products/...` wins over the route node, and it
+knows nothing about `{id}` placeholders. `route` reads the route nodes directly:
+
+```console
+$ graphify-symfony route https://shop.example.com/en/products/42?ref=home
+product_show  GET /en/products/{id}
+  params:     id=42
+  controller: ProductController::show()  src/Controller/ProductController.php:L21
+  renders:    product/show.html.twig  templates/product/show.html.twig
+  node:       route product_show GET /en/products/{id}
+```
+
+The query is a URL (full URL, query string, `/index.php/` prefix are fine; placeholders
+with requirements `{id<\d+>}` and optional ones `{page?1}` are honoured), an exact route
+name, or a fragment of a name or path. Literal routes are listed before parametrised ones.
+`--method POST` keeps routes accepting that method, `--app apps/admin` keeps routes declared
+under that directory (in a monorepo a URL usually belongs to one app), `--json` for tools.
+Exit codes: `0` found, `4` nothing matched, `2` no `graph.json`. The `node:` line is the
+exact label for `graphify path` / `graphify explain`.
 
 `run` reads `graphify-out/graph.json` (respects `GRAPHIFY_OUT`), removes the nodes and
 edges it added previously (`_origin: "graphify-symfony"`), extracts again and writes
